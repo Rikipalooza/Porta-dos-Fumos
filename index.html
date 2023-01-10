@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>Porta dos Fumos</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link type="text/css" rel="stylesheet" href="main.css">
+		<style>
+			#blocker {
+				position: absolute;
+				width: 100%;
+				height: 100%;
+				background-color: rgba(0,0,0,0.5);
+			}
+
+			#instructions {
+				width: 100%;
+				height: 100%;
+
+				display: flex;
+				flex-direction: column;
+				justify-content: center;
+				align-items: center;
+
+				text-align: center;
+				font-size: 14px;
+				cursor: pointer;
+			}
+		</style>
+	</head>
+	<body>
+		<div id="blocker">
+			<div id="instructions">
+				<p style="font-size:36px">
+					Bem-vindos à Porta dos Fumos
+				</p>
+				<p>
+					Move: WASD<br/>
+					Look: MOUSE
+				</p>
+			</div>
+		</div>
+
+		<!-- Import maps polyfill -->
+		<!-- Remove this when import maps will be widely supported -->
+		<script async src="https://unpkg.com/es-module-shims@1.3.6/dist/es-module-shims.js"></script>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "./node_modules/three/build/three.module.js",
+					"three/addons/": "./jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+
+			//Lá vem os ratos ver o código. Ratos goooooordos
+
+			import * as THREE from 'three';
+
+			import { PointerLockControls } from './js/PointerLockControls.js';
+			import { OBJLoader} from './node_modules/three/examples/jsm/loaders/OBJLoader.js';
+			import { TextGeometry } from './node_modules/three/examples/jsm/geometries/TextGeometry.js';
+			import { FontLoader } from './node_modules/three/examples/jsm/loaders/FontLoader.js';
+			import { VectorKeyframeTrack } from './node_modules/three/src/animation/tracks/VectorKeyframeTrack.js';
+
+			let camera, scene, renderer, controls;
+
+			const objects = [];
+
+			let raycaster;
+
+			let moveForward = false;
+			let moveBackward = false;
+			let moveLeft = false;
+			let moveRight = false;
+			let canJump = false;
+
+			let prevTime = performance.now();
+			const velocity = new THREE.Vector3();
+			const direction = new THREE.Vector3();
+			const vertex = new THREE.Vector3();
+			const color = new THREE.Color();
+
+			init();
+			animate();
+
+			function init() {
+
+				camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 1, 1000 );
+				camera.position.y = 10;
+				camera.position.set( 70, 10, -60 ) 
+
+				scene = new THREE.Scene();
+
+				const lightambiente = new THREE.HemisphereLight( 0xeeeeff, 0x777788, 0.30 );
+				lightambiente.position.set( 0.5, 1, 0.75 );
+				scene.add( lightambiente );
+
+				controls = new PointerLockControls( camera, document.body );
+
+				const blocker = document.getElementById( 'blocker' );
+				const instructions = document.getElementById( 'instructions' );
+
+				instructions.addEventListener( 'click', function () {
+
+					controls.lock();
+
+				} );
+
+				controls.addEventListener( 'lock', function () {
+
+					instructions.style.display = 'none';
+					blocker.style.display = 'none';
+
+				} );
+
+				controls.addEventListener( 'unlock', function () {
+
+					blocker.style.display = 'block';
+					instructions.style.display = '';
+
+				} );
+
+				scene.add( controls.getObject() );
+
+				const onKeyDown = function ( event ) {
+
+					switch ( event.code ) {
+
+						case 'ArrowUp':
+						case 'KeyW':
+							moveForward = true;
+							break;
+
+						case 'ArrowLeft':
+						case 'KeyA':
+							moveLeft = true;
+							break;
+
+						case 'ArrowDown':
+						case 'KeyS':
+							moveBackward = true;
+							break;
+
+						case 'ArrowRight':
+						case 'KeyD':
+							moveRight = true;
+							break;
+
+						case 'Space':
+							if ( canJump === true ) velocity.y += 350;
+							canJump = false;
+							break;
+
+					}
+
+				};
+
+				const onKeyUp = function ( event ) {
+
+					switch ( event.code ) {
+
+						case 'ArrowUp':
+						case 'KeyW':
+							moveForward = false;
+							break;
+
+						case 'ArrowLeft':
+						case 'KeyA':
+							moveLeft = false;
+							break;
+
+						case 'ArrowDown':
+						case 'KeyS':
+							moveBackward = false;
+							break;
+
+						case 'ArrowRight':
+						case 'KeyD':
+							moveRight = false;
+							break;
+
+					}
+
+				};
+
+				document.addEventListener( 'keydown', onKeyDown );
+				document.addEventListener( 'keyup', onKeyUp );
+
+				raycaster = new THREE.Raycaster( new THREE.Vector3(), new THREE.Vector3( 0, - 1, 0 ), 0, 10 );
+
+				// axes
+
+				const axesHelper = new THREE.AxesHelper( 50 );
+				scene.add( axesHelper );
+
+				//mapas textura
+
+				const paredes = new THREE.TextureLoader().load( './assets/parede.webp' );
+				const chao = new THREE.TextureLoader().load( './assets/floorcement.jpg' );
+
+				// floor
+
+				let floorGeometry = new THREE.PlaneGeometry( 1000, 1000  );
+				let floorMaterial = new THREE.MeshLambertMaterial ( {map: chao, side: THREE.DoubleSide} );
+				floorGeometry.rotateX( - Math.PI / 2 );
+				const floor = new THREE.Mesh( floorGeometry, floorMaterial );
+				floor.receiveShadow = true;
+				scene.add( floor );
+
+				//paredes (Sim há medida que fui fazendo mais fui percebendo que repeti bué merdas desnecessárias. Ratisse)
+
+				let parede1Geometry = new THREE.BoxGeometry( 200, 50, 10 );
+				let parede1Material = new THREE.MeshLambertMaterial ( {map: paredes, side: THREE.DoubleSide} );
+				parede1Geometry.translate( 0, 0, -208);
+				const parede1 = new THREE.Mesh( parede1Geometry, parede1Material );
+				parede1.receiveShadow = true;
+				parede1.userData.collider = true;
+				scene.add( parede1 );
+				objects.push( parede1 );
+				
+
+				let parede2Geometry = new THREE.BoxGeometry( 100, 50, 10 );
+				let parede2Material = new THREE.MeshLambertMaterial ( {map: paredes, side: THREE.DoubleSide} );
+				parede2Geometry.rotateY( - Math.PI / 2 );
+				parede2Geometry.translate( 97, 0, -153 );
+				const parede2 = new THREE.Mesh( parede2Geometry, parede2Material );
+				parede2.receiveShadow = true;
+				parede2.userData.collider = true;
+				scene.add( parede2 );
+				objects.push( parede2 );
+
+				let parede3Geometry = new THREE.BoxGeometry( 25, 50, 10 );
+				let parede3Material = new THREE.MeshLambertMaterial ( {map: paredes, side: THREE.DoubleSide} );
+				parede3Geometry.rotateY( - Math.PI / 2 );
+				parede3Geometry.translate( -97, 0, -193 );
+				const parede3 = new THREE.Mesh( parede3Geometry, parede3Material );
+				parede3.receiveShadow = true;
+				parede3.userData.collider = true;
+				scene.add( parede3 );
+				objects.push( parede3 );
+
+				let parede4Geometry = new THREE.BoxGeometry( 75, 50, 10 );
+				let parede4Material = new THREE.MeshLambertMaterial ( {map: paredes, side: THREE.DoubleSide} );
+				parede4Geometry.translate( -70, 0, -178 );
+				const parede4 = new THREE.Mesh( parede4Geometry, parede4Material );
+				parede4.receiveShadow = true;
+				parede4.userData.collider = true;
+				scene.add( parede4 );
+				objects.push( parede4 );
+
+				let parede5Geometry = new THREE.BoxGeometry ( 25, 50, 10);
+				let parede5Material = new THREE.MeshLambertMaterial ( {map: paredes, side:THREE.DoubleSide} );
+				parede5Geometry.rotateY( - Math.PI / 2 );
+				parede5Geometry.translate( -37.5, 0 , -162);
+				const parede5 = new THREE.Mesh( parede5Geometry, parede5Material );
+				parede5.receiveShadow = true;
+				parede5.userData.collider = true;
+				scene.add ( parede5 );
+				objects.push( parede5 );
+
+				let parede6Geometry = new THREE.BoxGeometry ( 50, 50, 10);
+				let parede6Material = new THREE.MeshLambertMaterial ( {map: paredes, side:THREE.DoubleSide} );
+				parede6Geometry.translate( -17.5, 0 , -144.5);
+				const parede6 = new THREE.Mesh( parede6Geometry, parede6Material );
+				parede6.receiveShadow = true;
+				parede6.userData.collider = true;
+				scene.add ( parede6 );
+				objects.push( parede6 );
+
+				let parede7Geometry = new THREE.BoxGeometry ( 25, 50, 5);
+				let parede7Material = new THREE.MeshLambertMaterial ( {map: paredes, side:THREE.DoubleSide} );
+				parede7Geometry.rotateY( - Math.PI / 2 );
+				parede7Geometry.translate( 7.5, 0 , -152);
+				const parede7 = new THREE.Mesh( parede7Geometry, parede7Material );
+				parede7.receiveShadow = true;
+				parede7.userData.collider = true;
+				scene.add ( parede7 );
+				objects.push( parede7 );
+
+				let parede8Geometry = new THREE.BoxGeometry ( 61.5, 50, 5);
+				let parede8Material = new THREE.MeshLambertMaterial ( {map: paredes, side:THREE.DoubleSide} );
+				parede8Geometry.rotateY( - Math.PI / 2 );
+				parede8Geometry.translate( 25, 0 , -133.75);
+				const parede8 = new THREE.Mesh( parede8Geometry, parede8Material );
+				parede8.receiveShadow = true;
+				parede8.userData.collider = true;
+				scene.add ( parede8 );
+				objects.push( parede8 );
+
+				let parede9Geometry = new THREE.BoxGeometry ( 20, 50, 5);
+				let parede9Material = new THREE.MeshLambertMaterial ( {map: paredes, side:THREE.DoubleSide} );
+				parede9Geometry.translate( 15, 0 , -162);
+				const parede9 = new THREE.Mesh( parede9Geometry, parede9Material );
+				parede9.receiveShadow = true;
+				parede9.userData.collider = true;
+				scene.add ( parede9 );
+				objects.push( parede9 );
+
+				let parede10Geometry = new THREE.BoxGeometry ( 25, 50, 5);
+				let parede10Material = new THREE.MeshLambertMaterial ( {map: paredes, side:THREE.DoubleSide} );
+				parede10Geometry.translate( 40, 0 , -105.5);
+				const parede10 = new THREE.Mesh( parede10Geometry, parede10Material );
+				parede10.receiveShadow = true;
+				parede10.userData.collider = true;
+				scene.add ( parede10 );
+				objects.push( parede10 );
+
+				let parede11Geometry = new THREE.BoxGeometry ( 50, 5, 5);
+				let parede11Material = new THREE.MeshLambertMaterial ( {map: paredes, side:THREE.DoubleSide} );
+				parede11Geometry.translate( 70, 22.5 , -105.5);
+				const parede11 = new THREE.Mesh( parede11Geometry, parede11Material );
+				parede11.receiveShadow = true;
+				parede11.userData.collider = true;
+				scene.add ( parede11 );
+				objects.push( parede11 );
+
+				let parede12Geometry = new THREE.BoxGeometry ( 200, 50, 5);
+				let parede12Material = new THREE.MeshLambertMaterial ( {map: paredes, side:THREE.DoubleSide} );
+				parede12Geometry.translate( -77, 0 , -105.5);
+				const parede12 = new THREE.Mesh( parede12Geometry, parede12Material );
+				parede12.receiveShadow = true;
+				parede12.userData.collider = true;
+				scene.add ( parede12 );
+				objects.push( parede12 );
+
+				//Teto
+
+				let parede13Geometry = new THREE.BoxGeometry ( 100, 50, 5);
+				let parede13Material = new THREE.MeshLambertMaterial ( {map: paredes, side:THREE.DoubleSide} );
+				parede13Geometry.rotateY( - Math.PI / 2 );
+				parede13Geometry.rotateZ( - Math.PI / 4 );
+				parede13Geometry.translate( 45.5, 40 , -154);
+				const parede13 = new THREE.Mesh( parede13Geometry, parede13Material );
+				parede13.receiveShadow = true;
+				scene.add ( parede13 );
+				objects.push( parede13 );
+
+				let parede14Geometry = new THREE.BoxGeometry ( 100, 50, 5);
+				let parede14Material = new THREE.MeshLambertMaterial ( {map: paredes, side:THREE.DoubleSide} );
+				parede14Geometry.rotateY( - Math.PI / 2 );
+				parede14Geometry.rotateZ( Math.PI / 4 );
+				parede14Geometry.translate( 84, 40 , -154);
+				const parede14 = new THREE.Mesh( parede14Geometry, parede14Material );
+				parede14.receiveShadow = true;
+				scene.add ( parede14 );
+				objects.push( parede14 );
+
+				const x = 0, y = 0;
+				const triangle1 = new THREE.Shape();
+				triangle1.moveTo( x - 40, y - 20 );
+				triangle1.lineTo( x + 40, y - 20 );
+				triangle1.lineTo( x, y + 20);
+
+				const textureLoader = new THREE.TextureLoader();
+				const texture = textureLoader.load('./assets/parede.webp');~
+				texture.repeat.set(6, 6);
+				texture.wrapS = THREE.RepeatWrapping;
+				texture.wrapT = THREE.RepeatWrapping;
+
+				const TriangleGeometry = new THREE.ShapeGeometry( triangle1 );
+				const Trianglematerial = new THREE.MeshLambertMaterial( { map: texture, side:THREE.DoubleSide } );
+				TriangleGeometry.translate( 65, 40 , -102.5)
+				const tri1 = new THREE.Mesh( TriangleGeometry, Trianglematerial );
+				tri1.receiveShadow = true;
+				scene.add ( tri1 )
+				objects.push( tri1 );
+
+				const Triangle2Geometry = new THREE.ShapeGeometry( triangle1 );
+				const Triangle2material = new THREE.MeshLambertMaterial( { map: texture, side:THREE.DoubleSide } );
+				Triangle2Geometry.translate( 65, 40 , -107.5)
+				const tri2 = new THREE.Mesh( Triangle2Geometry, Triangle2material );
+				tri2.receiveShadow = true;
+				scene.add ( tri2 )
+				objects.push( tri2 );
+
+				const Triangle3Geometry = new THREE.ShapeGeometry( triangle1 );
+				const Triangle3material = new THREE.MeshLambertMaterial( { map: texture, side:THREE.DoubleSide } );
+				Triangle3Geometry.translate( 65, 40 , -203)
+				const tri3 = new THREE.Mesh( Triangle3Geometry, Triangle3material );
+				tri3.receiveShadow = true;
+				scene.add ( tri3 )
+				objects.push( tri3 );
+
+				//Luzes
+
+				const luz = new THREE.PointLight(0xffffff, 1, 100);
+				luz.position.set(65, 30, -160);
+				scene.add(luz);
+
+				const lampGeometry = new THREE.SphereGeometry(0.5, 32, 32);
+				const lampMaterial = new THREE.MeshLambertMaterial({emissive: 0xffffff});
+				lampGeometry.translate( 65, 30, -160)
+				const lamp = new THREE.Mesh(lampGeometry, lampMaterial);
+				lamp.add(luz);
+				scene.add(lamp);
+
+				luz.color.set(0xFFE39C);
+				
+				//Sol (As luzes são uma velhisse gorda, porque não conseguem fazer sombras como eu queria, e sou demasiado burro para entender onde errei.)
+
+				const light = new THREE.SpotLight(0xFFFFFF, 0.75);
+				light.position.set(0, 0, 0);
+				light.castShadow = true;
+				light.angle = Math.PI / 6;
+				light.distance = 3000;
+				scene.add(light);
+
+				light.shadow.mapSize.width = 2048;
+				light.shadow.mapSize.height = 2048;
+
+				const sun = new THREE.TextureLoader().load( './assets/sun.jpg' );
+
+				const solGeometry = new THREE.SphereGeometry(32, 32, 32);
+				const solMaterial = new THREE.MeshLambertMaterial({map: sun, emissive:0xd24e01, emissiveIntensity:0.3});
+				const sol = new THREE.Mesh(solGeometry, solMaterial);
+				sol.position.set(0, 0, 0);
+				sol.add(light);
+				scene.add(sol);
+
+				light.rotation.set(Math.PI / 4, Math.PI / 4, 0);
+				sol.rotation.set(Math.PI / 4, Math.PI / 4, 0);
+				const distance = 500;
+
+				//const lightHelper = new THREE.SpotLightHelper( light );
+				//scene.add( lightHelper );
+
+				function update() {
+
+				const z = Math.sin(light.rotation.y) * distance;
+				const y = Math.cos(light.rotation.y) * distance;
+				light.position.set(0, y, z);
+				sol.position.set(0, y, z);
+
+				light.rotation.y += 0.006;
+				sol.rotation.y += 0.006;
+				//lightHelper.update();
+				requestAnimationFrame(update);
+				}
+
+				update();
+
+				// Update ao céu (Ainda estão a ver o código ratos?)
+				function updateSky(){
+					if( sol.position.y > 0 ){
+						scene.background = new THREE.Color( 0x87ceeb );
+						luz.intensity = 0;
+					} else {
+						scene.background = new THREE.Color( 0x0b1026 );
+						luz.intensity = 0.75;
+					}
+
+					requestAnimationFrame(updateSky);
+				}	
+				
+				updateSky();
+
+				//Objetos (ESTAMINA BAIXA)
+
+				const loader = new OBJLoader();
+
+				loader.load('./assets/3d/cadeira.obj',	function ( cadeira ) {
+					cadeira.scale.set(0.1, 0.1, 0.1)
+					cadeira.position.set(55, 0, -195)
+					cadeira.rotateY (- Math.PI / 2)
+					scene.add(cadeira);
+				})
+
+				loader.load('./assets/3d/VP.obj',	function ( Vaso ) {
+					Vaso.scale.set(0.1, 0.1, 0.1)
+					Vaso.position.set(-80, 0, -197)
+					scene.add(Vaso);
+				})
+
+				loader.load('./assets/3d/mesa.obj',	function ( mesa ) {
+					mesa.scale.set(0.07, 0.07, 0.07)
+					mesa.position.set(65, 0, -187)
+					scene.add(mesa);
+				})
+
+				loader.load('./assets/3d/Rato.obj', function (rato) {
+				rato.scale.set(0.01, 0.01, 0.01);
+				rato.position.set(55, 0, -190);
+				scene.add(rato);
+
+				// Acabei por não conseguir animar o rato :( dá-me um erro Cannot parse trackName: position e não o consigo corrigir por nada.
+				//var mixer = new THREE.AnimationMixer(rato);
+				//var track = new THREE.VectorKeyframeTrack('position', [0, 1, 2], [0, 0, 0, 0, 0, -10], THREE.Vector3Interpolant);
+				//var clip = new THREE.AnimationClip('moveBack', 2, [track]);
+				//var action = mixer.clipAction(clip);
+				//action.play();
+				});
+
+				loader.load('./assets/3d/cigarro.obj',	function ( cigarro ) {
+					cigarro.position.set(62, 5, -187)
+					scene.add(cigarro);
+				})
+
+				//Se estes objetos não vos partem todos, falhei na ratisse.
+
+				//Dar o nome à grandiosa Porta dos Fumos
+
+				const loadertext = new FontLoader();
+
+				loadertext.load( './assets/fonts/neonfont.json', function ( font ){
+					const Portadosfumos = new TextGeometry("Porta dos Fumos", {
+						size: 3,
+						height: 2,
+						font: font,
+					});
+					const TextoMaterial = new THREE.MeshLambertMaterial ({ color:0x1F51FF, emissive:0x1F51FF, emissiveIntensity:1, side: THREE.FrontSide});
+					const TextoMesh = new THREE.Mesh(Portadosfumos, TextoMaterial);
+					TextoMesh.position.set( 35, 20, -204.5 );
+					scene.add( TextoMesh );
+				});
+
+				//
+
+				renderer = new THREE.WebGLRenderer( { antialias: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+				renderer.shadowMap.enabled = true;
+				renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+				renderer.setSize( window.innerWidth, window.innerHeight );
+				document.body.appendChild( renderer.domElement );
+
+				//
+
+				window.addEventListener( 'resize', onWindowResize );
+
+			}
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+			}
+
+			function animate() {
+
+				requestAnimationFrame( animate );
+
+				const time = performance.now();
+
+				if ( controls.isLocked === true ) {
+
+					raycaster.ray.origin.copy( controls.getObject().position );
+					raycaster.ray.origin.y -= 10;
+
+					const intersections = raycaster.intersectObjects( objects );
+
+					const onObject = intersections.length > 0;
+
+					const delta = ( time - prevTime ) / 1000;
+
+					velocity.x -= velocity.x * 10.0 * delta;
+					velocity.z -= velocity.z * 10.0 * delta;
+
+					velocity.y -= 9.8 * 100.0 * delta; // 100.0 = mass
+
+					direction.z = Number( moveForward ) - Number( moveBackward );
+					direction.x = Number( moveRight ) - Number( moveLeft );
+					direction.normalize(); // this ensures consistent movements in all directions
+
+					if ( moveForward || moveBackward ) velocity.z -= direction.z * 400.0 * delta;
+					if ( moveLeft || moveRight ) velocity.x -= direction.x * 400.0 * delta;
+
+					if ( onObject === true ) {
+
+						velocity.y = Math.max( 0, velocity.y );
+						canJump = false;
+
+					}
+
+					controls.moveRight( - velocity.x * delta );
+					controls.moveForward( - velocity.z * delta );
+
+					controls.getObject().position.y += ( velocity.y * delta ); // new behavior
+
+					if ( controls.getObject().position.y < 10 ) {
+
+						velocity.y = 0;
+						controls.getObject().position.y = 10;
+
+						canJump = false;
+
+					if ( controls.getObject().position.x >= 90) {
+
+						velocity.x = 0;
+						controls.getObject().position.x = 90;
+
+						canJump = false;
+					}
+
+					else if ( 
+						controls.getObject().position.x <= -90) {
+
+						velocity.x = 0;
+						controls.getObject().position.x = -90;
+
+						canJump = false;
+					}
+
+					if (controls.getObject().position.z >= 200) {
+
+						velocity.z = 0;
+						controls.getObject().position.z =200;
+
+						canJump = false;
+					}
+
+					else if ( 
+						controls.getObject().position.z <= -200) {
+
+						velocity.z = 0;
+						controls.getObject().position.z = -200;
+
+						canJump = false;
+					}
+					}
+
+				}
+
+				prevTime = time;
+
+				renderer.render( scene, camera );
+
+			}
+
+		</script>
+	</body>
+</html>
